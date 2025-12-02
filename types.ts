@@ -40,6 +40,8 @@ export enum ViewMode {
   SEARCH = 'SEARCH',
   WORD_BOOK = 'WORD_BOOK',
   FLASHCARDS = 'FLASHCARDS',
+  QUIZ = 'QUIZ',
+  ANALYZER = 'ANALYZER'
 }
 
 export interface User {
@@ -53,4 +55,17 @@ export interface UserData {
   history: string[];
   settings: Settings;
   wordCache: Record<string, GREWordData>;
+}
+
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  wordData: GREWordData;
+}
+
+export interface AnalyzedWord {
+  word: string;
+  definition: string;
 }

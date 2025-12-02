@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { GREWordData } from "../types";
+import { GREWordData, AnalyzedWord } from "../types";
 
 // NOTE: In a production environment, never expose the key on the client side directly like this unless restricted by Referrer.
 // The instruction requires using process.env.API_KEY.
@@ -75,6 +75,26 @@ const wordSchema = {
   ],
 };
 
+const analyzerSchema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      word: { type: Type.STRING },
+      definition: { type: Type.STRING, description: "Brief 3-4 word definition in Chinese" }
+    },
+    required: ["word", "definition"]
+  }
+};
+
+const randomWordSchema = {
+  type: Type.OBJECT,
+  properties: {
+    word: { type: Type.STRING, description: "A single GRE-level English word" }
+  },
+  required: ["word"]
+};
+
 export const fetchWordData = async (word: string): Promise<GREWordData> => {
   const prompt = `
     Analyze the English word "${word}" for a GRE vocabulary student. 
@@ -95,7 +115,7 @@ export const fetchWordData = async (word: string): Promise<GREWordData> => {
     config: {
       responseMimeType: "application/json",
       responseSchema: wordSchema,
-      temperature: 0.3, // Lower temperature for factual consistency
+      temperature: 0.3, 
     },
   });
 
@@ -105,11 +125,66 @@ export const fetchWordData = async (word: string): Promise<GREWordData> => {
 
   try {
     const data = JSON.parse(response.text) as GREWordData;
-    // Add timestamp for history
     data.timestamp = Date.now();
     return data;
   } catch (e) {
     console.error("Failed to parse AI response", e);
     throw new Error("Failed to parse word data");
+  }
+};
+
+export const analyzeTextForGRE = async (text: string): Promise<AnalyzedWord[]> => {
+  const prompt = `
+    Analyze the following text and identify Advanced GRE-level vocabulary words.
+    Return a list of the identified words with very brief Chinese definitions (max 4 words).
+    Ignore common, basic English words.
+    
+    Text: "${text.substring(0, 1000)}"
+  `;
+
+  const response = await ai.models.generateContent({
+    model: modelName,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: analyzerSchema,
+      temperature: 0.2,
+    },
+  });
+
+  if (!response.text) return [];
+
+  try {
+    return JSON.parse(response.text) as AnalyzedWord[];
+  } catch (e) {
+    console.error("Analysis failed", e);
+    return [];
+  }
+};
+
+export const fetchRandomGREWord = async (excludedWords: string[]): Promise<string> => {
+  const prompt = `
+    Suggest ONE difficult, high-frequency GRE vocabulary word.
+    Do NOT choose any of these words: ${excludedWords.slice(0, 50).join(', ')}.
+    Return strictly JSON.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: modelName,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: randomWordSchema,
+      temperature: 1.0, // High temperature for variety
+    },
+  });
+
+  if (!response.text) throw new Error("Failed to get random word");
+
+  try {
+    const data = JSON.parse(response.text) as { word: string };
+    return data.word;
+  } catch (e) {
+    throw new Error("Failed to parse random word");
   }
 };
