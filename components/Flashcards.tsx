@@ -17,12 +17,22 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ words, onClose, fontClas
 
   // Sort words by mastery (lowest first) on mount
   useEffect(() => {
-    const sorted = [...words].sort((a, b) => {
-      const masteryA = a.stats?.masteryScore || 0;
-      const masteryB = b.stats?.masteryScore || 0;
-      return masteryA - masteryB;
-    });
-    setSortedWords(sorted);
+    // If sortedWords is empty, it means we are initializing (or words prop just loaded)
+    if (sortedWords.length === 0 && words.length > 0) {
+      const sorted = [...words].sort((a, b) => {
+        const masteryA = a.stats?.masteryScore || 0;
+        const masteryB = b.stats?.masteryScore || 0;
+        return masteryA - masteryB;
+      });
+      setSortedWords(sorted);
+    } else if (sortedWords.length > 0) {
+      // If words update (e.g. mastery score changes), update the data in place
+      // BUT preserve the existing order to prevent the card from switching instantly
+      setSortedWords(prev => prev.map(prevWord => {
+        const updatedWord = words.find(w => w.word === prevWord.word);
+        return updatedWord || prevWord;
+      }));
+    }
   }, [words]);
 
   // If no words, show empty state
