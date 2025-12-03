@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GREWordData, Settings, ViewMode, User, UserData } from './types';
+import { GREWordData, Settings, ViewMode, User, UserData, StudyStats, WordStats } from './types';
 import { fetchWordData, fetchRandomGREWord } from './services/geminiService';
 import { authService } from './services/authService';
 import { WordCard } from './components/WordCard';
@@ -9,6 +9,7 @@ import { AuthModal } from './components/AuthModal';
 import { TextAnalyzer } from './components/TextAnalyzer';
 import { Quiz } from './components/Quiz';
 import { StatsModal } from './components/StatsModal';
+import { LoadingReview } from './components/LoadingReview';
 import { 
   SearchIcon, 
   BookIcon, 
@@ -36,11 +37,16 @@ export default function App() {
   const [currentWord, setCurrentWord] = useState<GREWordData | null>(null);
   const [previousWord, setPreviousWord] = useState<GREWordData | null>(null); 
   const [error, setError] = useState<string | null>(null);
+  const [reviewCandidate, setReviewCandidate] = useState<GREWordData | null>(null);
   
   // Data Persistence
   const [history, setHistory] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<GREWordData[]>([]);
   const [wordCache, setWordCache] = useState<Record<string, GREWordData>>({});
+  const [studyStats, setStudyStats] = useState<StudyStats>({
+    streakDays: 0,
+    lastStudyDate: ''
+  });
   
   // Auth & Cloud State
   const [user, setUser] = useState<User | null>(null);
@@ -49,11 +55,10 @@ export default function App() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   
   // UI State
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.SEARCH);
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.HOME);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [showToolsMenu, setShowToolsMenu] = useState(false);
   
   const [settings, setSettings] = useState<Settings>({
     darkMode: false,
@@ -63,13 +68,40 @@ export default function App() {
 
   const historyDropdownRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const toolsMenuRef = useRef<HTMLDivElement>(null);
+
+  // --- Streak Logic ---
+  const checkDailyStreak = (currentStats: StudyStats) => {
+    const today = new Date().toISOString().split('T')[0];
+    const { lastStudyDate, streakDays } = currentStats;
+
+    if (lastStudyDate === today) return; // Already logged today
+
+    let newStreak = 1;
+    if (lastStudyDate) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      
+      if (lastStudyDate === yesterdayStr) {
+        newStreak = streakDays + 1;
+      } else {
+        // Streak broken
+        newStreak = 1;
+      }
+    }
+
+    setStudyStats({
+      streakDays: newStreak,
+      lastStudyDate: today
+    });
+  };
 
   // 1. Initial Load
   useEffect(() => {
     const savedFavs = localStorage.getItem('gre_favorites');
     const savedHist = localStorage.getItem('gre_history');
     const savedCache = localStorage.getItem('gre_cache');
+    const savedStats = localStorage.getItem('gre_stats');
     const savedSettings = localStorage.getItem('gre_settings');
 
     if (savedFavs) setFavorites(JSON.parse(savedFavs));
@@ -79,6 +111,15 @@ export default function App() {
       const parsed = JSON.parse(savedSettings);
       setSettings(parsed);
     }
+    
+    let currentStats = { streakDays: 0, lastStudyDate: '' };
+    if (savedStats) {
+      currentStats = JSON.parse(savedStats);
+      setStudyStats(currentStats);
+    }
+
+    // Calculate streak immediately on load
+    checkDailyStreak(currentStats);
 
     const currentUser = authService.getCurrentUser();
     if (currentUser) {
@@ -91,6 +132,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('gre_favorites', JSON.stringify(favorites)); }, [favorites]);
   useEffect(() => { localStorage.setItem('gre_history', JSON.stringify(history)); }, [history]);
   useEffect(() => { localStorage.setItem('gre_cache', JSON.stringify(wordCache)); }, [wordCache]);
+  useEffect(() => { localStorage.setItem('gre_stats', JSON.stringify(studyStats)); }, [studyStats]);
   useEffect(() => {
     localStorage.setItem('gre_settings', JSON.stringify(settings));
     if (settings.darkMode) {
@@ -105,11 +147,11 @@ export default function App() {
     if (!user) return;
     const timeoutId = setTimeout(() => {
       setIsSyncing(true);
-      const userData: UserData = { favorites, history, settings, wordCache };
+      const userData: UserData = { favorites, history, settings, wordCache, studyStats };
       authService.saveUserData(user.id, userData).then(() => setIsSyncing(false));
     }, 2000);
     return () => clearTimeout(timeoutId);
-  }, [favorites, history, settings, wordCache, user]);
+  }, [favorites, history, settings, wordCache, studyStats, user]);
 
   // 4. Sync Listener
   useEffect(() => {
@@ -131,6 +173,10 @@ export default function App() {
               setHistory(cloudData.history);
               setWordCache(cloudData.wordCache);
               setSettings(cloudData.settings);
+              if (cloudData.studyStats) {
+                setStudyStats(cloudData.studyStats);
+                checkDailyStreak(cloudData.studyStats);
+              }
             }
           } finally {
             setIsSyncing(false);
@@ -146,11 +192,66 @@ export default function App() {
     function handleClickOutside(event: MouseEvent) {
       if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) setShowHistory(false);
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) setShowUserMenu(false);
-      if (toolsMenuRef.current && !toolsMenuRef.current.contains(event.target as Node)) setShowToolsMenu(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // --- Logic for Smart Mastery & Stats Update ---
+
+  const updateWordStats = (word: string, action: 'review' | 'correct' | 'incorrect') => {
+    setWordCache(prev => {
+      const data = prev[word];
+      if (!data) return prev;
+
+      const stats: WordStats = data.stats || {
+        reviews: 0,
+        correctCount: 0,
+        incorrectCount: 0,
+        masteryScore: 0,
+        lastReviewed: 0
+      };
+
+      const newStats = { ...stats, lastReviewed: Date.now() };
+
+      if (action === 'review') {
+        newStats.reviews += 1;
+        newStats.masteryScore = Math.min(100, stats.masteryScore + 5);
+      } else if (action === 'correct') {
+        newStats.reviews += 1;
+        newStats.correctCount += 1;
+        newStats.masteryScore = Math.min(100, stats.masteryScore + 15);
+      } else if (action === 'incorrect') {
+        newStats.reviews += 1;
+        newStats.incorrectCount += 1;
+        newStats.masteryScore = Math.max(0, stats.masteryScore - 10);
+      }
+
+      const updatedWord = { ...data, stats: newStats };
+
+      // Also update favorites if it exists there
+      setFavorites(currFavs => currFavs.map(f => f.word === word ? updatedWord : f));
+
+      return { ...prev, [word]: updatedWord };
+    });
+  };
+
+  const getReviewCandidate = (): GREWordData | null => {
+    // Prioritize favorites, then all cached words
+    const pool = favorites.length > 0 ? favorites : Object.values(wordCache);
+    if (pool.length === 0) return null;
+
+    // Sort by mastery score (ascending) and time since last review (ascending)
+    // We want low mastery + not reviewed recently
+    const sorted = [...pool].sort((a, b) => {
+      const masteryA = a.stats?.masteryScore || 0;
+      const masteryB = b.stats?.masteryScore || 0;
+      return masteryA - masteryB;
+    });
+
+    // Pick top 1
+    return sorted[0];
+  };
 
   // --- Actions ---
 
@@ -166,6 +267,10 @@ export default function App() {
         setHistory(prev => Array.from(new Set([...prev, ...cloudData.history])).slice(0, 20));
         setWordCache(prev => ({ ...prev, ...cloudData.wordCache }));
         setSettings(cloudData.settings); 
+        if (cloudData.studyStats) {
+           setStudyStats(cloudData.studyStats);
+           checkDailyStreak(cloudData.studyStats);
+        }
       }
     } finally {
       setIsSyncing(false);
@@ -197,6 +302,7 @@ export default function App() {
 
       setPreviousWord(currentWord);
       setCurrentWord(null); 
+      // Simulate quick load
       setTimeout(() => {
         setCurrentWord(cachedData);
         setPreviousWord(null);
@@ -206,6 +312,10 @@ export default function App() {
       }, 50);
       return;
     }
+
+    // Logic for Review-While-Waiting
+    const candidate = getReviewCandidate();
+    setReviewCandidate(candidate);
 
     setLoading(true);
     setError(null);
@@ -226,10 +336,15 @@ export default function App() {
       setPreviousWord(null);
     } finally {
       setLoading(false);
+      setReviewCandidate(null);
     }
   };
 
   const handleRandomWord = async () => {
+    // Show review while waiting for random word too
+    const candidate = getReviewCandidate();
+    setReviewCandidate(candidate);
+    
     setLoading(true);
     setViewMode(ViewMode.SEARCH);
     setCurrentWord(null);
@@ -239,11 +354,12 @@ export default function App() {
     } catch (e) {
       setError("Failed to fetch random word.");
       setLoading(false);
+      setReviewCandidate(null);
     }
   };
 
   const handleExportData = () => {
-    const data: UserData = { favorites, history, settings, wordCache };
+    const data: UserData = { favorites, history, settings, wordCache, studyStats };
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -266,6 +382,7 @@ export default function App() {
         if (parsed.history) setHistory(parsed.history);
         if (parsed.wordCache) setWordCache(parsed.wordCache);
         if (parsed.settings) setSettings(parsed.settings);
+        if (parsed.studyStats) setStudyStats(parsed.studyStats);
         alert("Data imported successfully!");
         setShowSettings(false);
       } catch (err) {
@@ -287,7 +404,14 @@ export default function App() {
   const toggleTheme = () => setSettings(s => ({ ...s, darkMode: !s.darkMode }));
   const toggleFont = () => setSettings(s => ({ ...s, serifFont: !s.serifFont }));
   const fontClass = settings.serifFont ? 'font-serif' : 'font-sans';
-  const toggleWordBook = () => setViewMode(v => v === ViewMode.WORD_BOOK ? ViewMode.SEARCH : ViewMode.WORD_BOOK);
+  const toggleWordBook = () => setViewMode(v => v === ViewMode.WORD_BOOK ? ViewMode.HOME : ViewMode.WORD_BOOK);
+
+  // Navigation Helper
+  const goHome = () => {
+    setViewMode(ViewMode.HOME);
+    setCurrentWord(null);
+    setQuery('');
+  };
 
   return (
     <div className={`min-h-screen flex flex-col ${settings.darkMode ? 'dark' : ''} bg-stone-50 dark:bg-stone-900 transition-colors duration-300`}>
@@ -296,13 +420,24 @@ export default function App() {
       <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-stone-50/80 dark:bg-stone-900/80 border-b border-stone-200 dark:border-stone-800">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           
-          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => { setViewMode(ViewMode.SEARCH); setCurrentWord(null); }}>
-            <div className="w-8 h-8 bg-stone-800 dark:bg-stone-100 rounded-lg flex items-center justify-center shadow-sm">
-              <span className="text-white dark:text-stone-900 font-serif font-bold text-xl">G</span>
-            </div>
-            <span className="font-semibold text-stone-800 dark:text-stone-100 hidden sm:block tracking-tight">GRE Insight</span>
+          {/* LEFT: Logo or Back Button */}
+          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={goHome}>
+            {viewMode !== ViewMode.HOME ? (
+               <button className="flex items-center gap-2 text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors">
+                 <ArrowLeftIcon className="w-5 h-5" />
+                 <span className="hidden sm:inline text-sm font-medium">Back</span>
+               </button>
+            ) : (
+              <>
+                <div className="w-8 h-8 bg-stone-800 dark:bg-stone-100 rounded-lg flex items-center justify-center shadow-sm">
+                  <span className="text-white dark:text-stone-900 font-serif font-bold text-xl">G</span>
+                </div>
+                <span className="font-semibold text-stone-800 dark:text-stone-100 hidden sm:block tracking-tight">GRE Insight</span>
+              </>
+            )}
           </div>
 
+          {/* CENTER: Search Bar */}
           <div className="flex-1 max-w-md relative flex items-center gap-2">
             <div className="relative flex-1">
               <input 
@@ -310,7 +445,7 @@ export default function App() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch(query)}
-                placeholder="Search..."
+                placeholder="Search GRE vocabulary..."
                 className="w-full bg-stone-200/50 dark:bg-stone-800 border-none rounded-xl py-2 pl-9 pr-4 text-stone-800 dark:text-stone-200 focus:ring-2 focus:ring-stone-400 transition-all placeholder-stone-400 text-sm"
               />
               <SearchIcon className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
@@ -335,31 +470,8 @@ export default function App() {
             </div>
           </div>
 
+          {/* RIGHT: Actions */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            {/* Tools Dropdown */}
-            <div className="relative" ref={toolsMenuRef}>
-               <button 
-                onClick={() => setShowToolsMenu(!showToolsMenu)}
-                className="p-2 text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-800 rounded-lg transition-colors hidden sm:block"
-                title="Tools"
-               >
-                 <BeakerIcon className="w-6 h-6" />
-               </button>
-               {showToolsMenu && (
-                 <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-stone-800 rounded-xl shadow-xl border border-stone-100 dark:border-stone-700 py-1 z-50 animate-fade-in-down">
-                   <button onClick={() => { setViewMode(ViewMode.ANALYZER); setShowToolsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 flex items-center gap-2">
-                     <BeakerIcon className="w-4 h-4 text-indigo-500" /> Text Analyzer
-                   </button>
-                   <button onClick={() => { setViewMode(ViewMode.QUIZ); setShowToolsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 flex items-center gap-2">
-                     <LightningIcon className="w-4 h-4 text-amber-500" /> Daily Quiz
-                   </button>
-                   <button onClick={() => { setShowStats(true); setShowToolsMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 flex items-center gap-2">
-                     <ChartIcon className="w-4 h-4 text-emerald-500" /> Stats
-                   </button>
-                 </div>
-               )}
-            </div>
-
             <button onClick={toggleWordBook} className={`p-2 rounded-lg transition-colors hidden sm:block ${viewMode === ViewMode.WORD_BOOK ? 'text-amber-500 bg-amber-50 dark:bg-stone-800' : 'text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-800'}`}>
               <BookIcon className="w-6 h-6" />
             </button>
@@ -405,8 +517,79 @@ export default function App() {
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 pt-8 pb-12 relative min-h-[calc(100vh-4rem)]">
         {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl mb-6 text-center border border-red-100">{error}</div>}
         
-        {loading && <WordSkeleton />}
+        {loading && reviewCandidate ? (
+          <LoadingReview reviewWord={reviewCandidate} />
+        ) : loading ? (
+          <WordSkeleton />
+        ) : null}
 
+        {/* HOME DASHBOARD */}
+        {viewMode === ViewMode.HOME && !loading && (
+          <div className="animate-fade-in space-y-12 mt-4 md:mt-8">
+            
+            {/* Hero Section */}
+            <div className="text-center space-y-6">
+               <div className="inline-block p-6 rounded-3xl bg-white dark:bg-stone-800 shadow-sm border border-stone-100 dark:border-stone-700 mb-2">
+                  <span className="text-6xl">🎓</span>
+               </div>
+               <h2 className="text-3xl md:text-4xl font-serif text-stone-800 dark:text-stone-100 font-bold">Master GRE Vocabulary</h2>
+               <p className="text-stone-500 max-w-md mx-auto leading-relaxed">
+                 Enter a word above to generate structured analysis, etymology, and memory aids powered by AI.
+               </p>
+               
+               <button 
+                 onClick={handleRandomWord}
+                 className="mt-6 px-8 py-3 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-full shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all text-stone-600 dark:text-stone-300 flex items-center gap-3 mx-auto font-medium group"
+               >
+                 <DiceIcon className="w-5 h-5 text-indigo-500 group-hover:rotate-180 transition-transform duration-500" /> 
+                 <span>Surprise Me</span>
+               </button>
+            </div>
+
+            {/* Feature Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+              
+              {/* Analyzer Card */}
+              <div 
+                onClick={() => setViewMode(ViewMode.ANALYZER)}
+                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-indigo-200 dark:hover:border-indigo-900 transition-all cursor-pointer group"
+              >
+                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl w-fit mb-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                   <BeakerIcon className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">Text Analyzer</h3>
+                <p className="text-sm text-stone-500">Scan articles to identify and learn high-frequency GRE words instantly.</p>
+              </div>
+
+              {/* Quiz Card */}
+              <div 
+                onClick={() => setViewMode(ViewMode.QUIZ)}
+                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-amber-200 dark:hover:border-amber-900 transition-all cursor-pointer group"
+              >
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/30 rounded-xl w-fit mb-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
+                   <LightningIcon className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">Daily Quiz</h3>
+                <p className="text-sm text-stone-500">Test your retention with gamified quizzes based on your word book.</p>
+              </div>
+
+              {/* Stats Card */}
+              <div 
+                onClick={() => setShowStats(true)}
+                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-emerald-200 dark:hover:border-emerald-900 transition-all cursor-pointer group"
+              >
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl w-fit mb-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
+                   <ChartIcon className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">My Progress</h3>
+                <p className="text-sm text-stone-500">Track your learning streak, total words learned, and mastery level.</p>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* SEARCH RESULT */}
         {viewMode === ViewMode.SEARCH && !loading && currentWord && (
           <WordCard 
             data={currentWord} 
@@ -416,32 +599,11 @@ export default function App() {
           />
         )}
 
-        {/* Empty State / Surprise Me */}
-        {viewMode === ViewMode.SEARCH && !loading && !currentWord && (
-          <div className="text-center mt-20 md:mt-32 space-y-6 opacity-60 animate-fade-in">
-             <div className="inline-block p-6 rounded-3xl bg-white dark:bg-stone-800 shadow-sm mb-4">
-                <span className="text-6xl">🎓</span>
-             </div>
-             <h2 className="text-2xl font-serif text-stone-700 dark:text-stone-300">Master GRE Vocabulary</h2>
-             <p className="text-stone-500 max-w-sm mx-auto">
-               Enter a word to generate structured analysis, etymology, and memory aids powered by AI.
-             </p>
-             <button 
-               onClick={handleRandomWord}
-               className="mt-6 px-6 py-2 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-full shadow-sm hover:shadow-md transition-all text-sm font-semibold text-stone-600 dark:text-stone-300 flex items-center gap-2 mx-auto"
-             >
-               <DiceIcon className="w-5 h-5 text-indigo-500" /> Surprise Me
-             </button>
-          </div>
-        )}
-
+        {/* WORD BOOK */}
         {viewMode === ViewMode.WORD_BOOK && (
           <div className="pb-24 animate-fade-in">
             <div className="flex justify-between items-center mb-6">
-              <div className="flex items-center gap-4">
-                <button onClick={() => setViewMode(ViewMode.SEARCH)} className="p-2 -ml-2 hover:bg-stone-200 dark:hover:bg-stone-800 rounded-full transition-colors text-stone-500"><ArrowLeftIcon className="w-5 h-5" /></button>
-                <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
-              </div>
+              <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
               <span className="text-stone-500 bg-stone-100 dark:bg-stone-800 px-3 py-1 rounded-full text-sm font-medium">{favorites.length} words</span>
             </div>
             
@@ -459,7 +621,11 @@ export default function App() {
                        <button onClick={(e) => { e.stopPropagation(); toggleFavorite(fav); }} className="text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110" title="Remove"><CloseIcon className="w-4 h-4" /></button>
                     </div>
                     <p className="text-sm text-stone-600 dark:text-stone-400 truncate mb-1">{fav.definition}</p>
-                    <p className="text-xs text-stone-400 font-mono bg-stone-50 dark:bg-stone-900/50 inline-block px-1.5 py-0.5 rounded">{fav.partOfSpeech}</p>
+                    {/* Mastery Dot */}
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-stone-400 font-mono bg-stone-50 dark:bg-stone-900/50 inline-block px-1.5 py-0.5 rounded">{fav.partOfSpeech}</p>
+                      <div className={`w-2 h-2 rounded-full ${fav.stats?.masteryScore && fav.stats.masteryScore > 80 ? 'bg-green-500' : fav.stats?.masteryScore && fav.stats.masteryScore > 50 ? 'bg-indigo-500' : 'bg-stone-300'}`}></div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -467,10 +633,11 @@ export default function App() {
           </div>
         )}
 
+        {/* TOOLS VIEWS */}
         {viewMode === ViewMode.ANALYZER && (
            <TextAnalyzer 
              onWordClick={handleSearch} 
-             onBack={() => setViewMode(ViewMode.SEARCH)} 
+             onBack={goHome} 
              fontClass={fontClass} 
            />
         )}
@@ -478,10 +645,21 @@ export default function App() {
         {viewMode === ViewMode.QUIZ && (
            <Quiz 
              wordCache={wordCache} 
-             onBack={() => setViewMode(ViewMode.SEARCH)} 
+             onBack={goHome} 
              fontClass={fontClass} 
+             onResult={updateWordStats}
            />
         )}
+
+        {viewMode === ViewMode.FLASHCARDS && (
+          <Flashcards 
+             words={favorites} 
+             onClose={() => setViewMode(ViewMode.HOME)} 
+             fontClass={fontClass} 
+             onReview={(word) => updateWordStats(word, 'review')}
+          />
+        )}
+
       </main>
 
       {/* MODALS */}
@@ -529,12 +707,11 @@ export default function App() {
       
       {showStats && (
         <StatsModal 
-           data={{ favorites, history, settings, wordCache }} 
+           data={{ favorites, history, settings, wordCache, studyStats }} 
            onClose={() => setShowStats(false)} 
         />
       )}
 
-      {viewMode === ViewMode.FLASHCARDS && <Flashcards words={favorites} onClose={() => setViewMode(ViewMode.SEARCH)} fontClass={fontClass} />}
     </div>
   );
 }

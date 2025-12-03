@@ -1,3 +1,11 @@
+export interface WordStats {
+  reviews: number;
+  correctCount: number;
+  incorrectCount: number;
+  masteryScore: number; // 0 to 100
+  lastReviewed: number; // timestamp
+}
+
 export interface GREWordData {
   word: string;
   phonetic: string;
@@ -28,6 +36,7 @@ export interface GREWordData {
     meaning: string;
   }>;
   timestamp?: number;
+  stats?: WordStats;
 }
 
 export interface Settings {
@@ -37,6 +46,7 @@ export interface Settings {
 }
 
 export enum ViewMode {
+  HOME = 'HOME',
   SEARCH = 'SEARCH',
   WORD_BOOK = 'WORD_BOOK',
   FLASHCARDS = 'FLASHCARDS',
@@ -50,11 +60,17 @@ export interface User {
   name: string;
 }
 
+export interface StudyStats {
+  streakDays: number;
+  lastStudyDate: string; // ISO Date YYYY-MM-DD
+}
+
 export interface UserData {
   favorites: GREWordData[];
   history: string[];
   settings: Settings;
   wordCache: Record<string, GREWordData>;
+  studyStats: StudyStats;
 }
 
 export interface QuizQuestion {

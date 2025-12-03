@@ -1,6 +1,6 @@
 import React from 'react';
 import { GREWordData } from '../types';
-import { VolumeIcon, StarIcon } from './Icons';
+import { VolumeIcon, StarIcon, ChartIcon } from './Icons';
 
 interface WordCardProps {
   data: GREWordData;
@@ -29,13 +29,19 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFa
     window.speechSynthesis.speak(utterance);
   };
 
+  const mastery = data.stats?.masteryScore || 0;
+  let masteryColor = "bg-stone-300 dark:bg-stone-600";
+  if (mastery > 80) masteryColor = "bg-green-500";
+  else if (mastery > 50) masteryColor = "bg-indigo-500";
+  else if (mastery > 20) masteryColor = "bg-amber-500";
+
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-24">
       
       {/* 1. Basic Info */}
       <Card delay={0}>
         <div className="flex justify-between items-start">
-          <div>
+          <div className="flex-1">
             <div className="flex items-baseline gap-3 flex-wrap">
               <h1 className={`text-4xl md:text-5xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>
                 {data.word}
@@ -50,7 +56,20 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFa
                 {data.definition}
               </p>
             </div>
+            
+            {/* Mastery Bar */}
+            <div className="mt-4 flex items-center gap-2 max-w-xs">
+              <ChartIcon className="w-3 h-3 text-stone-400" />
+              <div className="flex-1 h-1.5 bg-stone-100 dark:bg-stone-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-1000 ${masteryColor}`} 
+                  style={{ width: `${mastery}%` }} 
+                />
+              </div>
+              <span className="text-xs text-stone-400 font-mono">{mastery}%</span>
+            </div>
           </div>
+
           <div className="flex gap-2">
             <button 
               onClick={playAudio}

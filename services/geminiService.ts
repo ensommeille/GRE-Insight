@@ -126,6 +126,14 @@ export const fetchWordData = async (word: string): Promise<GREWordData> => {
   try {
     const data = JSON.parse(response.text) as GREWordData;
     data.timestamp = Date.now();
+    // Initialize empty stats for new words
+    data.stats = {
+      reviews: 0,
+      correctCount: 0,
+      incorrectCount: 0,
+      masteryScore: 0,
+      lastReviewed: 0
+    };
     return data;
   } catch (e) {
     console.error("Failed to parse AI response", e);

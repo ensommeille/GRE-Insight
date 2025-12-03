@@ -6,9 +6,10 @@ interface QuizProps {
   wordCache: Record<string, GREWordData>;
   onBack: () => void;
   fontClass: string;
+  onResult: (word: string, isCorrect: boolean) => void;
 }
 
-export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass }) => {
+export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass, onResult }) => {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -20,7 +21,8 @@ export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass }) => {
   }, []);
 
   const generateQuiz = () => {
-    const words = Object.values(wordCache);
+    // Explicitly cast to GREWordData[] to avoid type inference issues
+    const words = Object.values(wordCache) as GREWordData[];
     if (words.length < 4) return;
 
     // Shuffle and pick 5 words
@@ -53,7 +55,13 @@ export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass }) => {
     if (selectedOption) return; // Prevent changing answer
     setSelectedOption(option);
 
-    if (option === questions[currentQIndex].correctAnswer) {
+    const isCorrect = option === questions[currentQIndex].correctAnswer;
+    const currentWord = questions[currentQIndex].wordData.word;
+
+    // Notify parent to update stats
+    onResult(currentWord, isCorrect);
+
+    if (isCorrect) {
       setScore(s => s + 1);
     }
 

@@ -10,7 +10,8 @@ interface StatsModalProps {
 export const StatsModal: React.FC<StatsModalProps> = ({ data, onClose }) => {
   const totalWords = Object.keys(data.wordCache).length;
   const favoritesCount = data.favorites.length;
-  const historyCount = data.history.length;
+  // Use real streak data or default to 0/1 if undefined (legacy data support)
+  const streak = data.studyStats?.streakDays || (totalWords > 0 ? 1 : 0);
   
   // Mock mastery level for visualization
   const masteryLevel = Math.min(100, Math.floor((totalWords / 500) * 100));
@@ -63,7 +64,7 @@ export const StatsModal: React.FC<StatsModalProps> = ({ data, onClose }) => {
                <LightningIcon className="w-5 h-5 text-indigo-500" />
                <span className="text-indigo-900 dark:text-indigo-200 font-medium">Daily Streak</span>
              </div>
-             <span className="text-xl font-bold text-indigo-600 dark:text-indigo-300">3 Days 🔥</span>
+             <span className="text-xl font-bold text-indigo-600 dark:text-indigo-300">{streak} Days 🔥</span>
            </div>
         </div>
       </div>

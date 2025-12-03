@@ -84,7 +84,8 @@ export const authService = {
       favorites: [],
       history: [],
       settings: { darkMode: false, serifFont: true, fontSize: 'medium' },
-      wordCache: {}
+      wordCache: {},
+      studyStats: { streakDays: 1, lastStudyDate: new Date().toISOString().split('T')[0] }
     };
     
     saveCloudDB(db);
@@ -122,8 +123,7 @@ export const authService = {
     // Broadcast Update Event so other tabs reload data
     syncChannel.postMessage({ type: 'DATA_UPDATE', userId });
     
-    // No artificial delay needed for 'save' to feel responsive, 
-    // but we can add a tiny one to simulate network ack
+    // No artificial delay needed for 'save' to feel responsive
     await delay(100); 
   },
 
