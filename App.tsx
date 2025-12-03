@@ -27,7 +27,8 @@ import {
   ChartIcon,
   DiceIcon,
   DownloadIcon,
-  UploadIcon
+  UploadIcon,
+  SortIcon
 } from './components/Icons';
 
 export default function App() {
@@ -59,6 +60,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [sortMode, setSortMode] = useState<'TIME' | 'MASTERY'>('TIME');
   
   const [settings, setSettings] = useState<Settings>({
     darkMode: false,
@@ -413,6 +415,17 @@ export default function App() {
     setQuery('');
   };
 
+  // Helper for Sorting Word Book
+  const getSortedFavorites = () => {
+    const sorted = [...favorites];
+    if (sortMode === 'TIME') {
+      return sorted.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); // Newest first
+    } else {
+      // Sort by mastery (lowest first to prioritize learning)
+      return sorted.sort((a, b) => (a.stats?.masteryScore || 0) - (b.stats?.masteryScore || 0));
+    }
+  };
+
   return (
     <div className={`min-h-screen flex flex-col ${settings.darkMode ? 'dark' : ''} bg-stone-50 dark:bg-stone-900 transition-colors duration-300`}>
       
@@ -603,8 +616,21 @@ export default function App() {
         {viewMode === ViewMode.WORD_BOOK && (
           <div className="pb-24 animate-fade-in">
             <div className="flex justify-between items-center mb-6">
-              <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
-              <span className="text-stone-500 bg-stone-100 dark:bg-stone-800 px-3 py-1 rounded-full text-sm font-medium">{favorites.length} words</span>
+              <div className="flex items-baseline gap-3">
+                 <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
+                 <span className="text-stone-500 bg-stone-100 dark:bg-stone-800 px-3 py-1 rounded-full text-sm font-medium">{favorites.length} words</span>
+              </div>
+              
+              {/* Sorting Toggle */}
+              {favorites.length > 0 && (
+                <button 
+                  onClick={() => setSortMode(s => s === 'TIME' ? 'MASTERY' : 'TIME')}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-sm text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
+                >
+                  <SortIcon className="w-4 h-4" />
+                  <span>Sort: {sortMode === 'TIME' ? 'Date Added' : 'Proficiency'}</span>
+                </button>
+              )}
             </div>
             
             {favorites.length === 0 ? (
@@ -614,20 +640,37 @@ export default function App() {
                </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {favorites.map((fav) => (
-                  <div key={fav.word} onClick={() => { setCurrentWord(fav); setViewMode(ViewMode.SEARCH); }} className="cursor-pointer bg-white dark:bg-stone-800 p-5 rounded-xl border border-stone-200 dark:border-stone-700 hover:shadow-md transition-all hover:border-stone-400 dark:hover:border-stone-500 group relative">
-                    <div className="flex justify-between items-start mb-2">
-                       <h3 className={`text-xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>{fav.word}</h3>
-                       <button onClick={(e) => { e.stopPropagation(); toggleFavorite(fav); }} className="text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110" title="Remove"><CloseIcon className="w-4 h-4" /></button>
+                {getSortedFavorites().map((fav) => {
+                  const score = fav.stats?.masteryScore || 0;
+                  let color = "bg-stone-300 dark:bg-stone-600";
+                  if (score > 80) color = "bg-green-500";
+                  else if (score > 50) color = "bg-indigo-500";
+                  else if (score > 20) color = "bg-amber-500";
+
+                  return (
+                    <div key={fav.word} onClick={() => { setCurrentWord(fav); setViewMode(ViewMode.SEARCH); }} className="cursor-pointer bg-white dark:bg-stone-800 p-5 rounded-xl border border-stone-200 dark:border-stone-700 hover:shadow-md transition-all hover:border-stone-400 dark:hover:border-stone-500 group relative">
+                      <div className="flex justify-between items-start mb-2">
+                         <h3 className={`text-xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>{fav.word}</h3>
+                         <button onClick={(e) => { e.stopPropagation(); toggleFavorite(fav); }} className="text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110" title="Remove"><CloseIcon className="w-4 h-4" /></button>
+                      </div>
+                      <p className="text-sm text-stone-600 dark:text-stone-400 truncate mb-4">{fav.definition}</p>
+                      
+                      {/* Detailed Mastery Bar */}
+                      <div className="mt-auto">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-xs text-stone-400 font-mono bg-stone-50 dark:bg-stone-900/50 px-1.5 py-0.5 rounded">{fav.partOfSpeech}</span>
+                          <span className="text-xs text-stone-400 font-mono">{score}%</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-stone-100 dark:bg-stone-700/50 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-1000 ${color}`} 
+                            style={{ width: `${score}%` }} 
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-sm text-stone-600 dark:text-stone-400 truncate mb-1">{fav.definition}</p>
-                    {/* Mastery Dot */}
-                    <div className="flex justify-between items-center">
-                      <p className="text-xs text-stone-400 font-mono bg-stone-50 dark:bg-stone-900/50 inline-block px-1.5 py-0.5 rounded">{fav.partOfSpeech}</p>
-                      <div className={`w-2 h-2 rounded-full ${fav.stats?.masteryScore && fav.stats.masteryScore > 80 ? 'bg-green-500' : fav.stats?.masteryScore && fav.stats.masteryScore > 50 ? 'bg-indigo-500' : 'bg-stone-300'}`}></div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
