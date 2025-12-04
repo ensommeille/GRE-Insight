@@ -37,6 +37,9 @@ export interface GREWordData {
   }>;
   timestamp?: number;
   stats?: WordStats;
+  // Typo correction fields
+  wasCorrected?: boolean;
+  originalQuery?: string;
 }
 
 export interface Settings {

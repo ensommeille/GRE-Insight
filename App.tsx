@@ -28,7 +28,10 @@ import {
   DiceIcon,
   DownloadIcon,
   UploadIcon,
-  SortIcon
+  SortIcon,
+  ChevronDownIcon,
+  BarsArrowUpIcon,
+  BarsArrowDownIcon
 } from './components/Icons';
 
 export default function App() {
@@ -60,7 +63,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [sortMode, setSortMode] = useState<'TIME' | 'MASTERY'>('TIME');
+  
+  // Sorting State
+  const [sortMode, setSortMode] = useState<'TIME' | 'MASTERY' | 'ALPHA'>('TIME');
+  const [sortDirection, setSortDirection] = useState<'ASC' | 'DESC'>('DESC'); // Default: Newest first
+  const [showSortMenu, setShowSortMenu] = useState(false);
   
   const [settings, setSettings] = useState<Settings>({
     darkMode: false,
@@ -70,6 +77,7 @@ export default function App() {
 
   const historyDropdownRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
 
   // --- Streak Logic ---
   const checkDailyStreak = (currentStats: StudyStats) => {
@@ -194,6 +202,7 @@ export default function App() {
     function handleClickOutside(event: MouseEvent) {
       if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) setShowHistory(false);
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) setShowUserMenu(false);
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) setShowSortMenu(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -244,15 +253,22 @@ export default function App() {
     if (pool.length === 0) return null;
 
     // Sort by mastery score (ascending) and time since last review (ascending)
-    // We want low mastery + not reviewed recently
     const sorted = [...pool].sort((a, b) => {
       const masteryA = a.stats?.masteryScore || 0;
       const masteryB = b.stats?.masteryScore || 0;
-      return masteryA - masteryB;
+      // Primary sort: Mastery ascending
+      if (masteryA !== masteryB) return masteryA - masteryB;
+      // Secondary sort: Last reviewed ascending (oldest first)
+      return (a.stats?.lastReviewed || 0) - (b.stats?.lastReviewed || 0);
     });
 
-    // Pick top 1
-    return sorted[0];
+    // Instead of always picking the first one, pick from the top 12 candidates randomly
+    // This adds more variety so users don't see the exact same word every time they search
+    const candidatePoolSize = Math.min(12, sorted.length);
+    const topCandidates = sorted.slice(0, candidatePoolSize);
+    const randomIndex = Math.floor(Math.random() * topCandidates.length);
+    
+    return topCandidates[randomIndex];
   };
 
   // --- Actions ---
@@ -406,24 +422,82 @@ export default function App() {
   const toggleTheme = () => setSettings(s => ({ ...s, darkMode: !s.darkMode }));
   const toggleFont = () => setSettings(s => ({ ...s, serifFont: !s.serifFont }));
   const fontClass = settings.serifFont ? 'font-serif' : 'font-sans';
-  const toggleWordBook = () => setViewMode(v => v === ViewMode.WORD_BOOK ? ViewMode.HOME : ViewMode.WORD_BOOK);
-
+  
   // Navigation Helper
-  const goHome = () => {
-    setViewMode(ViewMode.HOME);
-    setCurrentWord(null);
-    setQuery('');
+  // If we are in Word Book or Flashcards and have a current word, returning "back" should go to SEARCH view
+  const toggleWordBook = () => {
+    setViewMode(currentView => {
+      if (currentView === ViewMode.WORD_BOOK) {
+        // Closing Word Book
+        return currentWord ? ViewMode.SEARCH : ViewMode.HOME;
+      }
+      // Opening Word Book
+      return ViewMode.WORD_BOOK;
+    });
+  };
+
+  const handleHeaderBack = () => {
+    // If we are currently in Search view, "Back" means clearing the word and going Home.
+    if (viewMode === ViewMode.SEARCH) {
+      setViewMode(ViewMode.HOME);
+      setCurrentWord(null);
+      setQuery('');
+      return;
+    }
+
+    // If we are in other views (WordBook, Flashcards, Tools), "Back" depends on context
+    if (currentWord) {
+      setViewMode(ViewMode.SEARCH);
+    } else {
+      setViewMode(ViewMode.HOME);
+    }
   };
 
   // Helper for Sorting Word Book
   const getSortedFavorites = () => {
     const sorted = [...favorites];
-    if (sortMode === 'TIME') {
-      return sorted.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); // Newest first
-    } else {
-      // Sort by mastery (lowest first to prioritize learning)
-      return sorted.sort((a, b) => (a.stats?.masteryScore || 0) - (b.stats?.masteryScore || 0));
+    
+    return sorted.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortMode) {
+        case 'TIME':
+          // Default: Newest first (b - a)
+          comparison = (a.timestamp || 0) - (b.timestamp || 0);
+          break;
+        case 'MASTERY':
+          // Default: Lowest mastery first (a - b)
+          comparison = (a.stats?.masteryScore || 0) - (b.stats?.masteryScore || 0);
+          break;
+        case 'ALPHA':
+          // Default: A-Z
+          comparison = a.word.localeCompare(b.word);
+          break;
+      }
+
+      // Apply direction
+      // If DESC, reverse the comparison
+      // Note: My defaults above are inconsistent (TIME is usually DESC by default, others ASC).
+      // Let's standardize:
+      // TIME: ASC = Oldest first, DESC = Newest first
+      // MASTERY: ASC = Lowest score first, DESC = Highest score first
+      // ALPHA: ASC = A-Z, DESC = Z-A
+      
+      return sortDirection === 'ASC' ? comparison : -comparison;
+    });
+  };
+
+  const getSortLabel = (mode: string) => {
+    switch (mode) {
+      case 'TIME': return 'Date Added';
+      case 'MASTERY': return 'Proficiency';
+      case 'ALPHA': return 'A-Z';
+      default: return 'Date';
     }
+  };
+
+  const toggleDirection = () => {
+    setSortDirection(prev => prev === 'ASC' ? 'DESC' : 'ASC');
   };
 
   return (
@@ -434,7 +508,7 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           
           {/* LEFT: Logo or Back Button */}
-          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={goHome}>
+          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={handleHeaderBack}>
             {viewMode !== ViewMode.HOME ? (
                <button className="flex items-center gap-2 text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors">
                  <ArrowLeftIcon className="w-5 h-5" />
@@ -527,83 +601,105 @@ export default function App() {
       </header>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 pt-8 pb-12 relative min-h-[calc(100vh-4rem)]">
-        {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl mb-6 text-center border border-red-100">{error}</div>}
+      <main className="flex-1 max-w-5xl mx-auto w-full px-4 pt-8 pb-12">
         
-        {loading && reviewCandidate ? (
-          <LoadingReview reviewWord={reviewCandidate} />
-        ) : loading ? (
-          <WordSkeleton />
-        ) : null}
-
-        {/* HOME DASHBOARD */}
-        {viewMode === ViewMode.HOME && !loading && (
-          <div className="animate-fade-in space-y-12 mt-4 md:mt-8">
-            
+        {/* HOME VIEW */}
+        {viewMode === ViewMode.HOME && (
+          <div className="animate-fade-in space-y-12 py-8">
             {/* Hero Section */}
-            <div className="text-center space-y-6">
-               <div className="inline-block p-6 rounded-3xl bg-white dark:bg-stone-800 shadow-sm border border-stone-100 dark:border-stone-700 mb-2">
-                  <span className="text-6xl">🎓</span>
-               </div>
-               <h2 className="text-3xl md:text-4xl font-serif text-stone-800 dark:text-stone-100 font-bold">Master GRE Vocabulary</h2>
-               <p className="text-stone-500 max-w-md mx-auto leading-relaxed">
-                 Enter a word above to generate structured analysis, etymology, and memory aids powered by AI.
-               </p>
-               
-               <button 
-                 onClick={handleRandomWord}
-                 className="mt-6 px-8 py-3 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-full shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all text-stone-600 dark:text-stone-300 flex items-center gap-3 mx-auto font-medium group"
-               >
-                 <DiceIcon className="w-5 h-5 text-indigo-500 group-hover:rotate-180 transition-transform duration-500" /> 
-                 <span>Surprise Me</span>
-               </button>
+            <div className="text-center space-y-4 max-w-2xl mx-auto">
+              <div className="inline-block p-4 bg-stone-100 dark:bg-stone-800 rounded-3xl mb-4 shadow-inner">
+                 <span className="text-6xl">🎓</span>
+              </div>
+              <h1 className="text-4xl md:text-5xl font-serif font-bold text-stone-800 dark:text-stone-100">
+                Master GRE Vocabulary
+              </h1>
+              <p className="text-lg text-stone-500 dark:text-stone-400">
+                Enter a word to generate structured analysis, etymology, and memory aids powered by AI.
+              </p>
+              
+              <div className="pt-4">
+                 <button 
+                  onClick={handleRandomWord}
+                  className="px-6 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-full font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-2 mx-auto"
+                 >
+                   <DiceIcon className="w-5 h-5" /> Surprise Me
+                 </button>
+              </div>
             </div>
 
             {/* Feature Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-              
-              {/* Analyzer Card */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Text Analyzer Card */}
               <div 
                 onClick={() => setViewMode(ViewMode.ANALYZER)}
-                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-indigo-200 dark:hover:border-indigo-900 transition-all cursor-pointer group"
+                className="group bg-white dark:bg-stone-800 p-6 rounded-2xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer border border-stone-200 dark:border-stone-700"
               >
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl w-fit mb-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
-                   <BeakerIcon className="w-6 h-6" />
+                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-4 group-hover:scale-110 transition-transform">
+                   <BeakerIcon className="w-7 h-7" />
                 </div>
-                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">Text Analyzer</h3>
-                <p className="text-sm text-stone-500">Scan articles to identify and learn high-frequency GRE words instantly.</p>
+                <h3 className="text-xl font-bold text-stone-800 dark:text-stone-100 mb-2">Smart Text Analyzer</h3>
+                <p className="text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
+                   Paste article text to automatically identify and extract high-value GRE vocabulary words.
+                </p>
               </div>
 
               {/* Quiz Card */}
               <div 
                 onClick={() => setViewMode(ViewMode.QUIZ)}
-                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-amber-200 dark:hover:border-amber-900 transition-all cursor-pointer group"
+                className="group bg-white dark:bg-stone-800 p-6 rounded-2xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer border border-stone-200 dark:border-stone-700"
               >
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/30 rounded-xl w-fit mb-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
-                   <LightningIcon className="w-6 h-6" />
+                <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center text-amber-600 dark:text-amber-400 mb-4 group-hover:scale-110 transition-transform">
+                   <LightningIcon className="w-7 h-7" />
                 </div>
-                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">Daily Quiz</h3>
-                <p className="text-sm text-stone-500">Test your retention with gamified quizzes based on your word book.</p>
+                <h3 className="text-xl font-bold text-stone-800 dark:text-stone-100 mb-2">Daily Quiz</h3>
+                <p className="text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
+                   Test your retention with gamified quizzes based on your personal word collection.
+                </p>
               </div>
 
               {/* Stats Card */}
               <div 
-                onClick={() => setShowStats(true)}
-                className="bg-white dark:bg-stone-800 p-6 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-sm hover:shadow-xl hover:border-emerald-200 dark:hover:border-emerald-900 transition-all cursor-pointer group"
+                 onClick={() => setShowStats(true)}
+                 className="group bg-white dark:bg-stone-800 p-6 rounded-2xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer border border-stone-200 dark:border-stone-700"
               >
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl w-fit mb-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
-                   <ChartIcon className="w-6 h-6" />
+                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center text-emerald-600 dark:text-emerald-400 mb-4 group-hover:scale-110 transition-transform">
+                   <ChartIcon className="w-7 h-7" />
                 </div>
-                <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-2">My Progress</h3>
-                <p className="text-sm text-stone-500">Track your learning streak, total words learned, and mastery level.</p>
+                <h3 className="text-xl font-bold text-stone-800 dark:text-stone-100 mb-2">Learning Stats</h3>
+                <p className="text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
+                   Track your daily streaks, total words learned, and mastery progress over time.
+                </p>
               </div>
-
             </div>
           </div>
         )}
 
-        {/* SEARCH RESULT */}
-        {viewMode === ViewMode.SEARCH && !loading && currentWord && (
+        {/* LOADING & REVIEW VIEW */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center min-h-[50vh]">
+            {reviewCandidate ? (
+              <LoadingReview reviewWord={reviewCandidate} />
+            ) : (
+              <div className="text-center">
+                 <SpinnerIcon className="w-10 h-10 text-stone-400 mx-auto mb-4" />
+                 <p className="text-stone-500 animate-pulse">Consulting the archives...</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ERROR VIEW */}
+        {!loading && error && (
+          <div className="text-center py-20 animate-fade-in">
+             <div className="text-5xl mb-4">😕</div>
+             <p className="text-lg text-stone-500 mb-4">{error}</p>
+             <button onClick={() => { setError(null); setViewMode(ViewMode.HOME); }} className="text-indigo-600 hover:underline">Return Home</button>
+          </div>
+        )}
+
+        {/* SEARCH RESULT VIEW */}
+        {!loading && !error && viewMode === ViewMode.SEARCH && currentWord && (
           <WordCard 
             data={currentWord} 
             isFavorite={isFav(currentWord.word)}
@@ -611,148 +707,207 @@ export default function App() {
             fontClass={fontClass}
           />
         )}
+        
+        {/* WORD BOOK VIEW */}
+        {!loading && !error && viewMode === ViewMode.WORD_BOOK && (
+          <div className="animate-fade-in">
+             <div className="flex items-center justify-between mb-8">
+               <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
+               
+               <div className="flex items-center gap-2">
+                 {/* Sort Mode Dropdown */}
+                 <div className="relative" ref={sortMenuRef}>
+                    <button 
+                      onClick={() => setShowSortMenu(!showSortMenu)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs font-semibold text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+                    >
+                      <SortIcon className="w-4 h-4 text-stone-500" />
+                      {getSortLabel(sortMode)}
+                      <ChevronDownIcon className="w-3 h-3 text-stone-400" />
+                    </button>
 
-        {/* WORD BOOK */}
-        {viewMode === ViewMode.WORD_BOOK && (
-          <div className="pb-24 animate-fade-in">
-            <div className="flex justify-between items-center mb-6">
-              <div className="flex items-baseline gap-3">
-                 <h2 className={`text-3xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>Word Book</h2>
-                 <span className="text-stone-500 bg-stone-100 dark:bg-stone-800 px-3 py-1 rounded-full text-sm font-medium">{favorites.length} words</span>
-              </div>
-              
-              {/* Sorting Toggle */}
-              {favorites.length > 0 && (
-                <button 
-                  onClick={() => setSortMode(s => s === 'TIME' ? 'MASTERY' : 'TIME')}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-sm text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
-                >
-                  <SortIcon className="w-4 h-4" />
-                  <span>Sort: {sortMode === 'TIME' ? 'Date Added' : 'Proficiency'}</span>
-                </button>
-              )}
-            </div>
-            
-            {favorites.length === 0 ? (
-               <div className="text-center py-20 bg-stone-50 dark:bg-stone-800/50 rounded-2xl border border-dashed border-stone-300 dark:border-stone-700">
-                 <p className="text-stone-400 mb-2">Your Word Book is empty.</p>
-                 <p className="text-stone-500 text-sm">Star words in search results to add them here.</p>
+                    {showSortMenu && (
+                       <div className="absolute top-full right-0 mt-2 w-36 bg-white dark:bg-stone-800 rounded-xl shadow-xl border border-stone-100 dark:border-stone-700 py-1 z-20 animate-fade-in-down overflow-hidden">
+                          {[
+                            { id: 'TIME', label: 'Date Added' },
+                            { id: 'MASTERY', label: 'Proficiency' },
+                            { id: 'ALPHA', label: 'A-Z' }
+                          ].map((opt) => (
+                             <button
+                               key={opt.id}
+                               onClick={() => {
+                                 setSortMode(opt.id as any);
+                                 setShowSortMenu(false);
+                               }}
+                               className={`w-full text-left px-4 py-2 text-xs font-medium ${sortMode === opt.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
+                             >
+                               {opt.label}
+                             </button>
+                          ))}
+                       </div>
+                    )}
+                 </div>
+
+                 {/* Sort Direction Toggle */}
+                 <button
+                   onClick={toggleDirection}
+                   className="p-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-500 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+                   title={sortDirection === 'ASC' ? "Ascending" : "Descending"}
+                 >
+                   {sortDirection === 'ASC' ? <BarsArrowUpIcon className="w-4 h-4" /> : <BarsArrowDownIcon className="w-4 h-4" />}
+                 </button>
                </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {getSortedFavorites().map((fav) => {
-                  const score = fav.stats?.masteryScore || 0;
-                  let color = "bg-stone-300 dark:bg-stone-600";
-                  if (score > 80) color = "bg-green-500";
-                  else if (score > 50) color = "bg-indigo-500";
-                  else if (score > 20) color = "bg-amber-500";
+             </div>
+             
+             {favorites.length === 0 ? (
+               <div className="text-center py-20 bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 border-dashed">
+                 <div className="text-4xl mb-4 opacity-50">📚</div>
+                 <p className="text-stone-500 mb-2">Your word book is empty.</p>
+                 <p className="text-stone-400 text-sm">Star words to save them here for review.</p>
+               </div>
+             ) : (
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                 {getSortedFavorites().map(word => {
+                   const mastery = word.stats?.masteryScore || 0;
+                   let barColor = "bg-stone-300 dark:bg-stone-600";
+                   if (mastery > 80) barColor = "bg-green-500";
+                   else if (mastery > 50) barColor = "bg-indigo-500";
+                   else if (mastery > 20) barColor = "bg-amber-500";
 
-                  return (
-                    <div key={fav.word} onClick={() => { setCurrentWord(fav); setViewMode(ViewMode.SEARCH); }} className="cursor-pointer bg-white dark:bg-stone-800 p-5 rounded-xl border border-stone-200 dark:border-stone-700 hover:shadow-md transition-all hover:border-stone-400 dark:hover:border-stone-500 group relative">
-                      <div className="flex justify-between items-start mb-2">
-                         <h3 className={`text-xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>{fav.word}</h3>
-                         <button onClick={(e) => { e.stopPropagation(); toggleFavorite(fav); }} className="text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110" title="Remove"><CloseIcon className="w-4 h-4" /></button>
-                      </div>
-                      <p className="text-sm text-stone-600 dark:text-stone-400 truncate mb-4">{fav.definition}</p>
-                      
-                      {/* Detailed Mastery Bar */}
-                      <div className="mt-auto">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs text-stone-400 font-mono bg-stone-50 dark:bg-stone-900/50 px-1.5 py-0.5 rounded">{fav.partOfSpeech}</span>
-                          <span className="text-xs text-stone-400 font-mono">{score}%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-stone-100 dark:bg-stone-700/50 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-1000 ${color}`} 
-                            style={{ width: `${score}%` }} 
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                   return (
+                     <div 
+                       key={word.word} 
+                       onClick={() => {
+                         setCurrentWord(word);
+                         setViewMode(ViewMode.SEARCH);
+                         window.scrollTo(0,0);
+                       }}
+                       className="bg-white dark:bg-stone-800 p-5 rounded-xl border border-stone-200 dark:border-stone-700 hover:shadow-lg hover:border-stone-300 dark:hover:border-stone-600 transition-all cursor-pointer group"
+                     >
+                       <div className="flex justify-between items-start mb-2">
+                         <h3 className={`text-xl font-bold text-stone-800 dark:text-stone-100 ${fontClass}`}>{word.word}</h3>
+                         <button 
+                           onClick={(e) => { e.stopPropagation(); toggleFavorite(word); }}
+                           className="text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                         >
+                           <CloseIcon className="w-4 h-4 text-stone-300 hover:text-red-400" />
+                         </button>
+                       </div>
+                       <p className="text-sm text-stone-500 dark:text-stone-400 line-clamp-2 mb-4 h-10">{word.definition}</p>
+                       
+                       {/* Mastery Bar */}
+                       <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-stone-100 dark:bg-stone-700 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${mastery}%` }} />
+                          </div>
+                          <span className="text-[10px] font-mono text-stone-400">{mastery}%</span>
+                       </div>
+                     </div>
+                   );
+                 })}
+               </div>
+             )}
           </div>
         )}
 
-        {/* TOOLS VIEWS */}
+        {/* OTHER FULL SCREEN MODES */}
+        {viewMode === ViewMode.FLASHCARDS && (
+          <Flashcards 
+            words={favorites} 
+            onClose={() => {
+              if (currentWord) setViewMode(ViewMode.SEARCH);
+              else setViewMode(ViewMode.HOME);
+            }} 
+            fontClass={fontClass} 
+            onReview={(w) => updateWordStats(w, 'review')}
+          />
+        )}
+        
         {viewMode === ViewMode.ANALYZER && (
-           <TextAnalyzer 
-             onWordClick={handleSearch} 
-             onBack={goHome} 
-             fontClass={fontClass} 
-           />
+          <TextAnalyzer 
+             onBack={() => setViewMode(ViewMode.HOME)} 
+             fontClass={fontClass}
+             onWordClick={(w) => handleSearch(w)} 
+          />
         )}
 
         {viewMode === ViewMode.QUIZ && (
-           <Quiz 
-             wordCache={wordCache} 
-             onBack={goHome} 
-             fontClass={fontClass} 
-             onResult={updateWordStats}
-           />
-        )}
-
-        {viewMode === ViewMode.FLASHCARDS && (
-          <Flashcards 
-             words={favorites} 
-             onClose={() => setViewMode(ViewMode.HOME)} 
-             fontClass={fontClass} 
-             onReview={(word) => updateWordStats(word, 'review')}
+          <Quiz 
+            wordCache={wordCache}
+            onBack={() => setViewMode(ViewMode.HOME)}
+            fontClass={fontClass}
+            onResult={(word, isCorrect) => updateWordStats(word, isCorrect ? 'correct' : 'incorrect')}
           />
         )}
 
       </main>
 
+      {/* FOOTER */}
+      <footer className="py-6 text-center text-xs text-stone-400 dark:text-stone-600">
+        <p>&copy; 2024 GRE Insight. Powered by Google Gemini.</p>
+      </footer>
+
       {/* MODALS */}
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onLoginSuccess={handleLoginSuccess} />}
+      
+      {showStats && user && (
+         <StatsModal data={{favorites, history, settings, wordCache, studyStats}} onClose={() => setShowStats(false)} />
+      )}
+      
+      {showStats && !user && (
+        // Simple stats if not logged in
+        <StatsModal data={{favorites, history, settings, wordCache, studyStats}} onClose={() => setShowStats(false)} />
+      )}
+
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl p-6 w-full max-w-sm border border-stone-100 dark:border-stone-700">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100">Settings</h3>
-              <button onClick={() => setShowSettings(false)} className="text-stone-400 hover:text-stone-600"><CloseIcon className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center p-2">
-                <span className="text-stone-700 dark:text-stone-300 font-medium">Dark Mode</span>
-                <button onClick={toggleTheme} className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${settings.darkMode ? 'bg-stone-700' : 'bg-stone-300'}`}>
-                  <div className={`w-4 h-4 rounded-full bg-white shadow transform transition-transform duration-300 ${settings.darkMode ? 'translate-x-6' : ''}`} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-stone-200 dark:border-stone-700 relative">
+            <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600">
+              <CloseIcon className="w-5 h-5" />
+            </button>
+            <h2 className="text-xl font-bold mb-6 text-stone-800 dark:text-stone-100">Display Settings</h2>
+            
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600 dark:text-stone-300">Dark Mode</span>
+                <button 
+                  onClick={toggleTheme}
+                  className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.darkMode ? 'bg-indigo-500' : 'bg-stone-300'}`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.darkMode ? 'translate-x-6' : ''}`} />
                 </button>
               </div>
-              <div className="flex justify-between items-center p-2">
-                <span className="text-stone-700 dark:text-stone-300 font-medium">Serif Font</span>
-                <button onClick={toggleFont} className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${settings.serifFont ? 'bg-stone-700' : 'bg-stone-300'}`}>
-                  <div className={`w-4 h-4 rounded-full bg-white shadow transform transition-transform duration-300 ${settings.serifFont ? 'translate-x-6' : ''}`} />
+
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600 dark:text-stone-300">Serif Font</span>
+                <button 
+                  onClick={toggleFont}
+                  className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.serifFont ? 'bg-indigo-500' : 'bg-stone-300'}`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.serifFont ? 'translate-x-6' : ''}`} />
                 </button>
               </div>
-              
-              <div className="border-t border-stone-100 dark:border-stone-700 pt-4 mt-2">
-                <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Data Management</p>
+
+              <div className="border-t border-stone-100 dark:border-stone-700 pt-6">
+                <h3 className="text-xs font-bold uppercase text-stone-400 mb-4">Data Management</h3>
                 <div className="grid grid-cols-2 gap-3">
-                   <button onClick={handleExportData} className="flex flex-col items-center justify-center p-3 rounded-xl bg-stone-50 dark:bg-stone-900/50 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors text-stone-600 dark:text-stone-400 gap-2">
-                      <DownloadIcon className="w-5 h-5" />
-                      <span className="text-xs font-medium">Backup</span>
+                   <button 
+                     onClick={handleExportData}
+                     className="flex flex-col items-center justify-center gap-2 p-3 bg-stone-50 dark:bg-stone-900 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors border border-stone-200 dark:border-stone-700"
+                   >
+                     <DownloadIcon className="w-5 h-5 text-stone-500" />
+                     <span className="text-xs font-medium text-stone-600 dark:text-stone-400">Backup</span>
                    </button>
-                   <label className="flex flex-col items-center justify-center p-3 rounded-xl bg-stone-50 dark:bg-stone-900/50 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors text-stone-600 dark:text-stone-400 gap-2 cursor-pointer">
-                      <UploadIcon className="w-5 h-5" />
-                      <span className="text-xs font-medium">Restore</span>
-                      <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
+                   <label className="flex flex-col items-center justify-center gap-2 p-3 bg-stone-50 dark:bg-stone-900 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors border border-stone-200 dark:border-stone-700 cursor-pointer">
+                     <UploadIcon className="w-5 h-5 text-stone-500" />
+                     <span className="text-xs font-medium text-stone-600 dark:text-stone-400">Restore</span>
+                     <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
                    </label>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      )}
-
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onLoginSuccess={handleLoginSuccess} />}
-      
-      {showStats && (
-        <StatsModal 
-           data={{ favorites, history, settings, wordCache, studyStats }} 
-           onClose={() => setShowStats(false)} 
-        />
       )}
 
     </div>

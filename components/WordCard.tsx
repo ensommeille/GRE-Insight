@@ -22,6 +22,12 @@ const SectionTitle = ({ children }: { children?: React.ReactNode }) => (
   <h3 className="text-sm font-bold uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-3">{children}</h3>
 );
 
+// Helper to strip markdown symbols if the AI model mistakenly includes them
+const cleanText = (text: string) => {
+  if (!text) return "";
+  return text.replace(/[*_`~#]/g, '');
+};
+
 export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFavorite, fontClass }) => {
   const playAudio = () => {
     const utterance = new SpeechSynthesisUtterance(data.word);
@@ -38,6 +44,19 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFa
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-24">
       
+      {/* Typo Correction Banner */}
+      {data.wasCorrected && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl p-4 flex items-start gap-3 animate-fade-in text-sm">
+           <span className="text-xl">⚠️</span>
+           <div>
+             <p className="font-bold text-amber-800 dark:text-amber-400">Word not found</p>
+             <p className="text-amber-700 dark:text-amber-500">
+               We couldn't find "<strong>{data.originalQuery}</strong>". Showing results for "<strong>{data.word}</strong>" instead.
+             </p>
+           </div>
+        </div>
+      )}
+
       {/* 1. Basic Info */}
       <Card delay={0}>
         <div className="flex justify-between items-start">
@@ -114,8 +133,8 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFa
           <div>
             <SectionTitle>Etymology</SectionTitle>
             <div className="space-y-3 text-stone-700 dark:text-stone-300 text-sm">
-              <p><span className="font-semibold text-stone-900 dark:text-stone-100">来源：</span>{data.etymology.origin}</p>
-              <p><span className="font-semibold text-stone-900 dark:text-stone-100">结构：</span>{data.etymology.structure}</p>
+              <p><span className="font-semibold text-stone-900 dark:text-stone-100">来源：</span>{cleanText(data.etymology.origin)}</p>
+              <p><span className="font-semibold text-stone-900 dark:text-stone-100">结构：</span>{cleanText(data.etymology.structure)}</p>
             </div>
           </div>
           
@@ -123,7 +142,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isFavorite, onToggleFa
           <div className="md:border-l md:border-stone-100 md:dark:border-stone-700 md:pl-8">
             <SectionTitle>Core Logic</SectionTitle>
             <p className="text-stone-700 dark:text-stone-300 text-sm leading-relaxed">
-              {data.etymology.logic}
+              {cleanText(data.etymology.logic)}
             </p>
           </div>
         </div>
