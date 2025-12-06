@@ -252,7 +252,7 @@ export default function App() {
     });
   };
 
-  const getReviewCandidate = (): GREWordData | null => {
+  const getReviewCandidate = (excludeWord?: string): GREWordData | null => {
     // Prioritize favorites, then all cached words
     const pool = favorites.length > 0 ? favorites : Object.values(wordCache);
     if (pool.length === 0) return null;
@@ -270,9 +270,16 @@ export default function App() {
     // Instead of always picking the first one, pick from the top 12 candidates randomly
     // This adds more variety so users don't see the exact same word every time they search
     const candidatePoolSize = Math.min(12, sorted.length);
-    const topCandidates = sorted.slice(0, candidatePoolSize);
-    const randomIndex = Math.floor(Math.random() * topCandidates.length);
+    let topCandidates = sorted.slice(0, candidatePoolSize);
+
+    // Filter out the word currently being reviewed to avoid repetition
+    if (excludeWord && topCandidates.length > 1) {
+      topCandidates = topCandidates.filter(w => w.word !== excludeWord);
+    }
     
+    if (topCandidates.length === 0) return null;
+
+    const randomIndex = Math.floor(Math.random() * topCandidates.length);
     return topCandidates[randomIndex];
   };
 
@@ -315,6 +322,14 @@ export default function App() {
     const cleanTerm = term.trim();
     if (!cleanTerm) return;
     setShowHistory(false); 
+
+    // If already loading, treat this action as "Refresh Review Card"
+    // This allows user to cycle through review words while waiting
+    if (loading) {
+       const candidate = getReviewCandidate(reviewCandidate?.word);
+       setReviewCandidate(candidate);
+       return;
+    }
 
     const lowerTerm = cleanTerm.toLowerCase();
     const cachedKey = Object.keys(wordCache).find(k => k.toLowerCase() === lowerTerm);
@@ -481,13 +496,6 @@ export default function App() {
       }
 
       // Apply direction
-      // If DESC, reverse the comparison
-      // Note: My defaults above are inconsistent (TIME is usually DESC by default, others ASC).
-      // Let's standardize:
-      // TIME: ASC = Oldest first, DESC = Newest first
-      // MASTERY: ASC = Lowest score first, DESC = Highest score first
-      // ALPHA: ASC = A-Z, DESC = Z-A
-      
       return sortDirection === 'ASC' ? comparison : -comparison;
     });
   };
@@ -540,7 +548,13 @@ export default function App() {
                 placeholder="Search GRE vocabulary..."
                 className="w-full bg-stone-200/50 dark:bg-stone-800 border-none rounded-xl py-2 pl-9 pr-4 text-stone-800 dark:text-stone-200 focus:ring-2 focus:ring-stone-400 transition-all placeholder-stone-400 text-sm"
               />
-              <SearchIcon className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+              <button 
+                onClick={() => handleSearch(query)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 transition-colors p-0.5"
+                title={loading ? "Refresh Review Word" : "Search"}
+              >
+                <SearchIcon className="w-4 h-4" />
+              </button>
             </div>
             
             <div className="relative" ref={historyDropdownRef}>
