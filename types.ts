@@ -46,6 +46,12 @@ export interface Settings {
   darkMode: boolean;
   serifFont: boolean;
   fontSize: 'small' | 'medium' | 'large';
+  // Quiz Settings
+  quizSource: 'ALL' | 'FAVORITES';
+  quizMode: 'RANDOM' | 'WEAKEST';
+  quizQuestionCount: number;
+  // Learning Goals
+  learningGoal: number;
 }
 
 export enum ViewMode {

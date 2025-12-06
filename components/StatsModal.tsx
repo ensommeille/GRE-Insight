@@ -13,8 +13,11 @@ export const StatsModal: React.FC<StatsModalProps> = ({ data, onClose }) => {
   // Use real streak data or default to 0/1 if undefined (legacy data support)
   const streak = data.studyStats?.streakDays || (totalWords > 0 ? 1 : 0);
   
-  // Mock mastery level for visualization
-  const masteryLevel = Math.min(100, Math.floor((totalWords / 500) * 100));
+  // Use user defined goal or default 500
+  const goal = data.settings.learningGoal || 500;
+  
+  // Calculate mastery level based on goal
+  const masteryLevel = Math.min(100, Math.floor((totalWords / goal) * 100));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 animate-fade-in">
@@ -51,7 +54,7 @@ export const StatsModal: React.FC<StatsModalProps> = ({ data, onClose }) => {
         <div className="space-y-6">
            <div>
              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-stone-600 dark:text-stone-400">GRE Mastery Goal (500 Words)</span>
+                <span className="text-sm font-medium text-stone-600 dark:text-stone-400">GRE Mastery Goal ({goal} Words)</span>
                 <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{masteryLevel}%</span>
              </div>
              <div className="h-3 w-full bg-stone-100 dark:bg-stone-700 rounded-full overflow-hidden">

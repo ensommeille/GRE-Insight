@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { GREWordData, QuizQuestion } from '../types';
+import { GREWordData, QuizQuestion, Settings } from '../types';
 import { ArrowLeftIcon, LightningIcon } from './Icons';
 
 interface QuizProps {
   wordCache: Record<string, GREWordData>;
+  favorites: GREWordData[];
+  settings: Settings;
   onBack: () => void;
   fontClass: string;
   onResult: (word: string, isCorrect: boolean) => void;
 }
 
-export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass, onResult }) => {
+export const Quiz: React.FC<QuizProps> = ({ wordCache, favorites, settings, onBack, fontClass, onResult }) => {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -21,17 +23,44 @@ export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass, onResu
   }, []);
 
   const generateQuiz = () => {
-    // Explicitly cast to GREWordData[] to avoid type inference issues
-    const words = Object.values(wordCache) as GREWordData[];
-    if (words.length < 4) return;
+    // Determine Source Pool
+    let sourcePool: GREWordData[] = [];
+    if (settings.quizSource === 'FAVORITES') {
+      sourcePool = [...favorites];
+    } else {
+      // Explicitly cast to GREWordData[] to avoid type inference issues
+      sourcePool = Object.values(wordCache) as GREWordData[];
+    }
 
-    // Shuffle and pick 5 words
-    const shuffled = [...words].sort(() => 0.5 - Math.random());
-    const targetWords = shuffled.slice(0, 5);
+    if (sourcePool.length < 4) return;
+
+    // Filter valid words (basic sanity check)
+    let candidates = sourcePool.filter(w => w && w.word && w.definition);
+
+    // Apply Sorting Mode
+    if (settings.quizMode === 'WEAKEST') {
+      // Sort by mastery score ascending (weakest first)
+      // Add a slight random factor to sorting so equal scores aren't always in same order
+      candidates.sort((a, b) => {
+        const scoreA = a.stats?.masteryScore || 0;
+        const scoreB = b.stats?.masteryScore || 0;
+        if (scoreA === scoreB) return 0.5 - Math.random();
+        return scoreA - scoreB;
+      });
+    } else {
+      // Random Shuffle
+      candidates.sort(() => 0.5 - Math.random());
+    }
+
+    // Limit Question Count
+    const targetWords = candidates.slice(0, settings.quizQuestionCount || 5);
+
+    // Generate Questions
+    const allWords = Object.values(wordCache) as GREWordData[]; // Use all words for distractors for better variety
 
     const newQuestions: QuizQuestion[] = targetWords.map((wordData, i) => {
-      // Pick 3 distractors
-      const distractors = words
+      // Pick 3 distractors from ALL cached words to ensure we have enough options even if Favorites list is small
+      const distractors = allWords
         .filter(w => w.word !== wordData.word)
         .sort(() => 0.5 - Math.random())
         .slice(0, 3)
@@ -76,16 +105,21 @@ export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass, onResu
     }, 1500);
   };
 
-  if (Object.keys(wordCache).length < 4) {
+  if (questions.length === 0) {
+    const minWords = 4;
     return (
       <div className="max-w-md mx-auto text-center mt-20 animate-fade-in">
         <div className="inline-block p-4 bg-amber-100 dark:bg-amber-900/30 rounded-full mb-4 text-amber-600 dark:text-amber-400">
           <LightningIcon className="w-8 h-8" />
         </div>
         <h3 className="text-xl font-bold mb-2 text-stone-800 dark:text-stone-100">Not Enough Words</h3>
-        <p className="text-stone-500 mb-6">Search and learn at least 4 words to unlock the Daily Quiz.</p>
+        <p className="text-stone-500 mb-6">
+          {settings.quizSource === 'FAVORITES' 
+            ? `Add at least ${minWords} words to your favorites to start a quiz.` 
+            : `Search and learn at least ${minWords} words to unlock the Daily Quiz.`}
+        </p>
         <button onClick={onBack} className="px-6 py-2 bg-stone-200 dark:bg-stone-700 rounded-lg font-medium">
-          Back to Search
+          Back
         </button>
       </div>
     );
@@ -108,8 +142,6 @@ export const Quiz: React.FC<QuizProps> = ({ wordCache, onBack, fontClass, onResu
       </div>
     );
   }
-
-  if (questions.length === 0) return null;
 
   const currentQ = questions[currentQIndex];
 

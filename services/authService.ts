@@ -83,7 +83,15 @@ export const authService = {
     db.userData[newUser.id] = {
       favorites: [],
       history: [],
-      settings: { darkMode: false, serifFont: true, fontSize: 'medium' },
+      settings: { 
+        darkMode: false, 
+        serifFont: true, 
+        fontSize: 'medium',
+        quizSource: 'ALL',
+        quizMode: 'RANDOM',
+        quizQuestionCount: 5,
+        learningGoal: 500
+      },
       wordCache: {},
       studyStats: { streakDays: 1, lastStudyDate: new Date().toISOString().split('T')[0] }
     };

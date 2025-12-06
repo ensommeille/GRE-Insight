@@ -72,7 +72,11 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>({
     darkMode: false,
     serifFont: true,
-    fontSize: 'medium'
+    fontSize: 'medium',
+    quizSource: 'ALL',
+    quizMode: 'RANDOM',
+    quizQuestionCount: 5,
+    learningGoal: 500
   });
 
   const historyDropdownRef = useRef<HTMLDivElement>(null);
@@ -119,7 +123,8 @@ export default function App() {
     if (savedCache) setWordCache(JSON.parse(savedCache));
     if (savedSettings) {
       const parsed = JSON.parse(savedSettings);
-      setSettings(parsed);
+      // Merge with default values for new fields if missing
+      setSettings(prev => ({ ...prev, ...parsed }));
     }
     
     let currentStats = { streakDays: 0, lastStudyDate: '' };
@@ -834,6 +839,8 @@ export default function App() {
         {viewMode === ViewMode.QUIZ && (
           <Quiz 
             wordCache={wordCache}
+            favorites={favorites}
+            settings={settings}
             onBack={() => setViewMode(ViewMode.HOME)}
             fontClass={fontClass}
             onResult={(word, isCorrect) => updateWordStats(word, isCorrect ? 'correct' : 'incorrect')}
@@ -850,45 +857,109 @@ export default function App() {
       {/* MODALS */}
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onLoginSuccess={handleLoginSuccess} />}
       
-      {showStats && user && (
+      {showStats && (
          <StatsModal data={{favorites, history, settings, wordCache, studyStats}} onClose={() => setShowStats(false)} />
-      )}
-      
-      {showStats && !user && (
-        // Simple stats if not logged in
-        <StatsModal data={{favorites, history, settings, wordCache, studyStats}} onClose={() => setShowStats(false)} />
       )}
 
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-stone-200 dark:border-stone-700 relative">
+          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-stone-200 dark:border-stone-700 relative overflow-y-auto max-h-[90vh]">
             <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600">
               <CloseIcon className="w-5 h-5" />
             </button>
-            <h2 className="text-xl font-bold mb-6 text-stone-800 dark:text-stone-100">Display Settings</h2>
+            <h2 className="text-xl font-bold mb-6 text-stone-800 dark:text-stone-100">Settings</h2>
             
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <span className="text-stone-600 dark:text-stone-300">Dark Mode</span>
-                <button 
-                  onClick={toggleTheme}
-                  className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.darkMode ? 'bg-indigo-500' : 'bg-stone-300'}`}
-                >
-                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.darkMode ? 'translate-x-6' : ''}`} />
-                </button>
+              
+              {/* Display Section */}
+              <div className="space-y-4">
+                 <h3 className="text-xs font-bold uppercase text-stone-400">Display</h3>
+                 <div className="flex items-center justify-between">
+                  <span className="text-stone-600 dark:text-stone-300">Dark Mode</span>
+                  <button 
+                    onClick={toggleTheme}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.darkMode ? 'bg-indigo-500' : 'bg-stone-300'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.darkMode ? 'translate-x-6' : ''}`} />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-600 dark:text-stone-300">Serif Font</span>
+                  <button 
+                    onClick={toggleFont}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.serifFont ? 'bg-indigo-500' : 'bg-stone-300'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.serifFont ? 'translate-x-6' : ''}`} />
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-stone-600 dark:text-stone-300">Serif Font</span>
-                <button 
-                  onClick={toggleFont}
-                  className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.serifFont ? 'bg-indigo-500' : 'bg-stone-300'}`}
-                >
-                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${settings.serifFont ? 'translate-x-6' : ''}`} />
-                </button>
+              {/* Quiz Configuration */}
+              <div className="space-y-4 border-t border-stone-100 dark:border-stone-700 pt-4">
+                 <h3 className="text-xs font-bold uppercase text-stone-400">Daily Quiz</h3>
+                 
+                 <div>
+                   <label className="block text-xs font-medium text-stone-500 mb-1">Source</label>
+                   <select 
+                     value={settings.quizSource}
+                     onChange={(e) => setSettings(s => ({ ...s, quizSource: e.target.value as any }))}
+                     className="w-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-700 dark:text-stone-300"
+                   >
+                     <option value="ALL">All Cached Words</option>
+                     <option value="FAVORITES">Favorites Only</option>
+                   </select>
+                 </div>
+
+                 <div>
+                   <label className="block text-xs font-medium text-stone-500 mb-1">Mode</label>
+                   <select 
+                     value={settings.quizMode}
+                     onChange={(e) => setSettings(s => ({ ...s, quizMode: e.target.value as any }))}
+                     className="w-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-700 dark:text-stone-300"
+                   >
+                     <option value="RANDOM">Random Shuffle</option>
+                     <option value="WEAKEST">Prioritize Weakest</option>
+                   </select>
+                 </div>
+
+                 <div>
+                   <label className="block text-xs font-medium text-stone-500 mb-1">Questions per Session: {settings.quizQuestionCount}</label>
+                   <input 
+                     type="range" 
+                     min="5" 
+                     max="20" 
+                     step="5"
+                     value={settings.quizQuestionCount}
+                     onChange={(e) => setSettings(s => ({ ...s, quizQuestionCount: parseInt(e.target.value) }))}
+                     className="w-full h-2 bg-stone-200 rounded-lg appearance-none cursor-pointer dark:bg-stone-700"
+                   />
+                   <div className="flex justify-between text-xs text-stone-400 px-1 mt-1">
+                     <span>5</span>
+                     <span>10</span>
+                     <span>15</span>
+                     <span>20</span>
+                   </div>
+                 </div>
               </div>
 
-              <div className="border-t border-stone-100 dark:border-stone-700 pt-6">
+              {/* Learning Goals */}
+              <div className="space-y-4 border-t border-stone-100 dark:border-stone-700 pt-4">
+                 <h3 className="text-xs font-bold uppercase text-stone-400">Learning Goals</h3>
+                 <div>
+                   <label className="block text-xs font-medium text-stone-500 mb-1">Target Word Count</label>
+                   <input 
+                     type="number" 
+                     min="50"
+                     step="50"
+                     value={settings.learningGoal}
+                     onChange={(e) => setSettings(s => ({ ...s, learningGoal: parseInt(e.target.value) || 500 }))}
+                     className="w-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-700 dark:text-stone-300"
+                   />
+                 </div>
+              </div>
+
+              {/* Data Management */}
+              <div className="border-t border-stone-100 dark:border-stone-700 pt-4">
                 <h3 className="text-xs font-bold uppercase text-stone-400 mb-4">Data Management</h3>
                 <div className="grid grid-cols-2 gap-3">
                    <button 
